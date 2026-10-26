@@ -1,0 +1,13 @@
+{
+  "_note": "Euros per avocado, for a small family producer in Ecuador packing for export. Positive class = diseased (reject). Each figure is an assumption justified in REPORT.md. Re-running train.py (or just the app) picks up changes.",
+  "base_rate": 0.04,
+  "cost_fn_eur": 20.0,
+  "cost_fp_eur": 0.3,
+  "cost_tp_eur": 0.0,
+  "cost_tn_eur": 0.0,
+  "review_seconds_per_case": 6,
+  "reviewer_cost_eur_per_hour": 3.5,
+  "human_review_accuracy": 0.97,
+  "cases_per_day": 5000,
+  "review_hours_per_person_per_day": 7
+}

@@ -1,0 +1,93 @@
+{
+  "dataset": {
+    "workspace": "yaiinternsproject",
+    "project": "avocado-foo4c",
+    "version": 1,
+    "url": "https://universe.roboflow.com/yaiinternsproject/avocado-foo4c/dataset/1",
+    "test_images": 268,
+    "test_diseased": 198
+  },
+  "training": {
+    "base_model": "yolo11n.pt",
+    "epochs": 40,
+    "fraction": 1.0,
+    "imgsz": 640,
+    "batch": 16,
+    "patience": 10,
+    "seed": 0,
+    "device": "mps"
+  },
+  "positive_class": "diseased (any of Anthracnose, Cercospora Spot, Stem End Rot, Sunblotch)",
+  "detection": {
+    "map50": 0.8,
+    "map50_95": 0.526
+  },
+  "baselines": {
+    "finetuned yolo11n": {
+      "map50": 0.8,
+      "map50_95": 0.526,
+      "auc": 0.987,
+      "best_threshold": 0.16,
+      "recall_at_best": 0.975,
+      "false_positive_rate_at_best": 0.057,
+      "min_cost_per_1000": 36.66
+    },
+    "COCO yolo11n zero-shot": {
+      "map50": 0.0,
+      "map50_95": 0.0,
+      "note": "no COCO class matches any of our five classes",
+      "auc": 0.462,
+      "best_threshold": 0.0,
+      "recall_at_best": 1.0,
+      "false_positive_rate_at_best": 1.0,
+      "min_cost_per_1000": 288.0
+    },
+    "trivial: predict nothing (export all)": {
+      "map50": 0.0,
+      "map50_95": 0.0,
+      "auc": 0.5,
+      "min_cost_per_1000": 800.0
+    },
+    "trivial: majority of test split (reject all)": {
+      "map50": 0.0,
+      "map50_95": 0.0,
+      "auc": 0.5,
+      "min_cost_per_1000": 288.0
+    }
+  },
+  "costs_used": {
+    "_note": "Euros per avocado, for a small family producer in Ecuador packing for export. Positive class = diseased (reject). Each figure is an assumption justified in REPORT.md. Re-running train.py (or just the app) picks up changes.",
+    "base_rate": 0.04,
+    "cost_fn_eur": 20.0,
+    "cost_fp_eur": 0.3,
+    "cost_tp_eur": 0.0,
+    "cost_tn_eur": 0.0,
+    "review_seconds_per_case": 6,
+    "reviewer_cost_eur_per_hour": 3.5,
+    "human_review_accuracy": 0.97,
+    "cases_per_day": 5000,
+    "review_hours_per_person_per_day": 7,
+    "review_cost_eur": 0.005833333333333334
+  },
+  "single_threshold": {
+    "threshold": 0.16,
+    "cost_per_1000": 36.66
+  },
+  "review_band": {
+    "lo": 0.01,
+    "hi": 0.58,
+    "cost_per_case": 0.016027859547859555,
+    "review_share": 0.2137950937950938,
+    "cost_per_1000": 16.03,
+    "reviews_per_day": 1068.9754689754689,
+    "review_hours_per_day": 1.7816257816257812,
+    "reviewers_needed": 0.25451796880368305
+  },
+  "alternatives_per_1000": {
+    "do_nothing (export everything)": 800.0,
+    "reject everything": 288.0,
+    "person checks everything": 38.47333333333336,
+    "model alone (t=0.16)": 36.659163059163056,
+    "model + review band (0.01-0.58)": 16.027859547859556
+  }
+}
