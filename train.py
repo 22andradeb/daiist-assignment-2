@@ -26,6 +26,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -210,6 +214,21 @@ def decision_summary(scores: np.ndarray, labels: np.ndarray, costs: dict) -> dic
     }
 
 
+def plot_cost_curve(sweep: pd.DataFrame, chosen: pd.Series, band: dict) -> None:
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(sweep.threshold, sweep.cost_per_1000, label="model alone")
+    ax.plot(chosen.threshold, chosen.cost_per_1000, "r*", markersize=14,
+            label=f"chosen t={chosen.threshold:.2f} (EUR {chosen.cost_per_1000:.0f} per 1,000)")
+    ax.axvspan(band["lo"], band["hi"], alpha=0.15, color="orange",
+               label=f"review band {band['lo']:.2f}-{band['hi']:.2f} (EUR {1000 * band['cost_per_case']:.0f} per 1,000)")
+    ax.set_xlabel("Reject threshold (disease score)")
+    ax.set_ylabel("Expected cost per 1,000 avocados (EUR)")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(ARTIFACTS / "cost_curve.png", dpi=120)
+    plt.close(fig)
+
+
 # --- pipeline ---------------------------------------------------------------
 
 def main(train_model: bool = True) -> None:
@@ -246,6 +265,7 @@ def main(train_model: bool = True) -> None:
     sweep.to_csv(ARTIFACTS / "cost_sweep.csv", index=False)
     band = decision.best_review_band(finetuned, labels, costs)
     chosen = sweep.loc[sweep.cost_per_1000.idxmin()]
+    plot_cost_curve(sweep, chosen, band)
 
     p = costs["base_rate"]
     baselines = {
