@@ -5,24 +5,17 @@
 - **Email**: bandrade.ieu2022@student.ie.edu
 - **Group**: BBADBA 5A
 
-## Business problem, and the cost of being wrong
+## Business problem and My Identified Cost of Error 
 
-My family's business, Alobuela, is a small avocado producer in Ecuador. Before
-fruit is exported,
-someone has to look at each avocado and decide whether it is healthy enough to
-export, should be rejected, or needs a closer look. This model supports that
-decision at the sorting table: it flags avocados showing disease (anthracnose,
-Cercospora spot, sunblotch or stem-end rot) so they can be pulled before
-packing.
+I wanted to look for a business scenario that actually intrested me so I decided on my family's business, Alobuela it is a small avocado producer in Ecuador. Before
+fruit is exported we have a worker that looks at each avocado and decides whether it is healthy enough to
+export if it should be discarted. This model supports that decision at the sorting table it will hopefully flags avocados showing disease (anthracnose,
+Cercospora spot, sunblotch or stem-end rot) so they can be pulled before packing.
 
-The two mistakes do not cost the same. Rejecting a healthy avocado (false
-positive) loses the difference between its export price and what it sells for
-on the local market, about €0.11. Exporting a diseased one (false negative)
-can ruin a whole box, because rot spreads to the fruit around it and the buyer
-discounts the box. From Ecuadorian export prices that comes to about €7.04
-(derived below). A missed diseased avocado is therefore roughly 64 times more
-costly than a wrongly rejected healthy one. This is why I care more about recall on the
-diseased class than about precision, and why the threshold ends up low.
+The two mistakes do not cost the same because rejecting a healthy avocado (false positive) loses the difference between its export price and what it sells for
+on the local market, about €0.11. Exporting a diseased one (false negative) can ruin a whole box, because rot spreads to the fruit around it and the buyer
+discounts the box. From Ecuadorian export prices that comes to about €7.04 (explained below). A missed diseased avocado is therefore roughly 64 times more
+costly than a wrongly rejected healthy one. This is why I care more about recall on the diseased class than about precision, and why the threshold ends up low.
 
 ## Dataset
 
@@ -37,16 +30,16 @@ There are five classes: **Anthracnose**, **Cercospora Spot**, **Healthy**,
 **Stem End Rot** and **Sunblotch**.
 
 For the decision I group them: the **positive class is "diseased"** (any of the
-four diseases → reject) and the **negative class is "Healthy"** (export). The
+four diseases = reject) and the **negative class is "Healthy"** (export). The
 model still learns all five classes so I can report each one separately.
 
 This dataset fits the problem because it labels the specific skin diseases a
 sorter looks for before export, not just "good" and "bad" fruit, and it
-includes a Healthy class (103 test boxes) to measure false alarms against. It
-falls short in two ways. First, the photos are not from a sorting table: in
+includes a Healthy class (103 test boxes) to measure false alarms against. 
+
+I did find its limitations in two ways. First, the photos are not from a sorting table in
 the images I looked at there were studio shots on a white background,
-supermarket shelf photos and even collage figures taken from research papers.
-Second, one disease, Stem End Rot, has almost no examples (see below).
+supermarket shelf photos and even collage figures taken from research papers. This of course could limit the real life applicaiton given that the image quality of a actual sensor would not be the same. Then the second limitation is that the Stem End Rot disease has almost no examples (explained below).
 
 ## What the dataset's composition implies
 
@@ -67,16 +60,16 @@ and none in validation or test, so I have no measured performance for it at
 all: I do not know whether the model catches it, only that I cannot say. With
 so few examples it has probably learned very little, and as far as I understand
 stem-end rot starts at the stem and can be hard to see from outside. Because a
-missed diseased avocado is my expensive error (€7.04), this is a real blind spot.
-Everything in this report covers only the four classes in the test set, and
-before using this on the farm I would collect and label photos of stem-end rot.
+missed diseased avocado is my expensive error (€7.04), this is a real blind spot. That is why i decided that 
+everything in this report covers only the four classes in the test set, and
+before using this on the farm I would collect and label photos of stem-end rot and if it is too hard to obtain discard it from the model completly.
 
 **Sunblotch is too thin to trust.** 26 boxes in 12 images means one or two
 mistakes move its precision and recall by several points. The per-class numbers
 I can trust are Anthracnose, Cercospora Spot and Healthy, each with 100+ test
 boxes.
 
-**The 74% diseased test split does not break the cost analysis.** On my farm I
+**The 74% diseased test split does not break the cost analysis.** On my families  farm I
 assume 4% of avocados are diseased. The rates I use, the miss rate (share of
 diseased avocados the model passes) and the false-alarm rate (share of healthy
 avocados it rejects), are measured within each class, so they do not depend on
@@ -92,11 +85,11 @@ each wrongly rejected healthy avocado moves the false-alarm rate by 1.4 points.
 **The 0.80 mAP will probably not hold on the farm; I treat it as an upper
 bound.** The test images look like the training images (same sources, same
 studio and supermarket style), not like avocados on my family's sorting table,
-with different lighting, dirt, backgrounds and possibly varieties. I also found
+with different lighting and infinite possibly varieties. I also found
 at least one test image that is the same photo as a training image, slightly
 cropped, which inflates the score. Real miss rates are likely higher, so real
-costs are higher too. Before relying on any of these numbers I would run a
-small pilot: photograph a few hundred avocados on the actual sorting table,
+costs are higher too. I am aware that before relying on any of these numbers I would run a
+small pilot so that I can photograph a few hundred avocados on the actual sorting table,
 label them, and measure again.
 
 ## Finetuning and baselines
@@ -104,20 +97,20 @@ label them, and measure again.
 **Model and task.** I finetuned `yolo11n` for **object detection** rather than
 image classification, for three reasons:
 
-- A photo can hold several avocados. Most test images show one, but some show
-  up to ten. A classifier gives one label per image, so a tray with one diseased
+- Because most of the pictures in the data set have more than one avocado in the image some even
+  up to ten. I realized that a  classifier would give one label per image, so a tray with one diseased
   fruit among healthy ones would get a single label that doesn't say which fruit
-  is the problem. A detector boxes and labels each one.
-- The box shows the sorter where to look. A fruit sent for review can be
+  is the problem. So I need detector boxes and label each one.
+- The box would help the worker where to look. A fruit sent for review can be
   confirmed or overruled in a few seconds because the reviewer goes straight to
-  the boxed spot. My 6-seconds-per-check assumption depends on this.
+  the boxed spot. I assumed it would take around 6 second to analyze.
 - Boxes make mistakes visible. If the model flags a fruit because of a shadow
   or a sticker, the box shows it; a bare "diseased" label would hide it.
 
-The trade-off is that detection needs box annotations, which are more work to
-produce than image labels. Here the dataset already has them.
+The trade off is that detection needs box annotations, which are more work to
+produce than image labels. Luckly here the dataset already has them.
 
-**Training.** On my own MacBook (Apple M5 Pro, GPU via MPS), starting from the
+**Training.**  I started from the
 pretrained COCO `yolo11n.pt` checkpoint: 40 epochs, image size 640, batch 16,
 early-stopping patience 10, seed 0. It took 2.3 hours. The best epoch (by
 Ultralytics' validation fitness score, mainly mAP50-95) is saved as `weights/avocado_yolo11n.pt`.
@@ -141,11 +134,11 @@ detects. That gives an AUC of 0.46, which is essentially chance (0.5 means no
 signal), so it is no better than the trivial baselines. It is a floor: what I
 would get without finetuning. Finetuning works this well because the network
 already knows general visual features (edges, textures, shapes) from
-pretraining and only has to learn the avocado-specific classes. The gap between
-finetuned and COCO is real, but as said above, the absolute 0.80 is measured on
+pretraining and only has to learn the avocado specific classes. The gap between
+finetuned and COCO is real but as I mentioned the absolute 0.80 is measured on
 images like the training data and may not carry over to the farm.
 
-The gap is about what I expected: I thought finetuning on a few thousand
+The gap is about what I expected, I thought finetuning on a few thousand
 labelled photos would clearly beat a model that has never seen these classes.
 What surprised me more was how completely the COCO model fails. I expected a
 strong general model to pick up at least some signal, but with an AUC of 0.46
@@ -203,22 +196,17 @@ So the model fails on small lesions and on images unlike its typical training
 photo.
 
 **What this means for the farm.** The model's weakest class is exactly where an
-error costs most: a missed diseased avocado costs €7.04, about 64 times the
+error costs most so a missed diseased avocado costs €7.04, about 64 times the
 €0.11 of rejecting a healthy one. Even with the review band, over a third of
 the remaining cost (€2.84 of the €7.80 per 1,000) comes from the 1% of diseased
 avocados that still get exported, all Anthracnose. To reduce it I would
 photograph closer or at higher resolution so small spots cover more pixels,
-collect more labelled Anthracnose examples, especially early spots that look
-like bruises, and consider a lower threshold for Anthracnose boxes
-specifically, so borderline cases go to a person, since a check costs under a
-cent (6 s at €3.45/h). The
-domain-shift warning applies most here: dirt, dust and poor light on a real
-sorting table look exactly like small dark spots, so the farm's miss rate for
-Anthracnose could be worse than on the test set.
+collect more labelled Anthracnose examples.
+
 
 ## Cost matrix and operating point
 
-The prices come from official Ecuadorian statistics; the box assumptions are
+The prices come from official Ecuadorian statistics and the box assumptions are
 mine. Everything is stored in `costs.json`, including the derivation. Dollars
 are converted at the ECB's 2025 average of $1.13 per euro.
 
@@ -334,7 +322,7 @@ both Anthracnose cases.
 
 **Would I ship it?** Yes, but only after a pilot. The design is clearly
 cheaper than the alternatives on these numbers, but the numbers come from photos
-unlike my family's sorting table, and Stem End Rot was never tested. Before
+unlike my family's sorting table. Before
 relying on it I would photograph and label a few hundred avocados on the actual
 sorting table, re-measure the miss and false-alarm rates, and re-run the same
 cost sweep with them.
@@ -342,11 +330,11 @@ cost sweep with them.
 ## Limitations & next steps
 
 1. **The photos are not from a sorting table.** The dataset mixes studio shots,
-   supermarket photos, stock images and research-paper figures. Every number
+   supermarket photos, research paper figures ect. Every number
    here (0.80 mAP, 97.5% recall, €16 per 1,000) is measured on images like
-   that, so it is an upper bound for the farm. *Fix:* photograph and label a
+   that, so it is an upper bound for the farm. I would add photograph and label a
    few hundred avocados on my family's sorting table, under its real lighting,
-   and use them as the test set. Then re-run the same cost sweep.
+   and use them as the test set. Then re run the same cost sweep.
 2. **Stem End Rot is untested.** About 7 training photos and none in
    validation or test, so I have no evidence the model catches it. *Fix:*
    collect labelled stem-end-rot photos. Until then, any fruit a sorter suspects
@@ -382,25 +370,19 @@ cost sweep with them.
    highest disease score in an image, so in a photo of several avocados one
    diseased fruit flags the whole image. On a sorting table each avocado would
    be photographed on its own, so the decision would be per fruit, as intended.
-   *Fix:* in the pilot, take one photo per avocado.
+   In the pilot, take one photo per avocado.
 
 ## Generative AI use disclosure
 
-I used Claude (Anthropic, through Claude Code) throughout this assignment. It
-searched Roboflow Universe and suggested candidate datasets, downloaded the
-data and computed the class counts, and wrote the code: the training and
+I used Claude  throughout this assignment. I 
+searched Roboflow Universe and looked for the avocado dataset, downloaded the
+data and computed the class counts, claude helped me write the code: the training and
 evaluation pipeline (`train.py`), the cost model (`decision.py`) and the Gradio
 dashboard (`app.py`). It also ran the analyses I asked for (the missed
 Anthracnose cases, the sensitivity of the design to the FN cost), found the
 official statistics I asked for (Banco Central del Ecuador export figures, the
 MAG producer-price bulletin, the minimum wage and the ECB exchange rate),
-computed the cost derivation from them, and turned my notes and answers into
-the wording of this report, and formatted it.
-
-I also used a separate AI chat to find reference prices and wage figures
-(FreshPlaza, FAOSTAT, Eurostat) and to suggest ranges for the costs, and to
-draft rough notes on the questions in each section, which I reviewed and
-adapted.
+computed the cost derivation from them.
 
 The decisions are mine: framing the problem around my family's avocado farm in
 Ecuador, choosing the rot and disease dataset, treating any disease as the
