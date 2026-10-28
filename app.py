@@ -28,14 +28,19 @@ metrics = json.loads((ARTIFACTS / "metrics.json").read_text())
 per_class = pd.read_csv(ARTIFACTS / "per_class.csv")
 confusion = json.loads((ARTIFACTS / "confusion_matrix.json").read_text())
 test_scores = pd.read_csv(ARTIFACTS / "test_scores.csv")
+val_scores = pd.read_csv(ARTIFACTS / "valid_scores.csv")
 costs = decision.load_costs()
 
+# Thresholds are chosen on validation; everything shown is measured on test.
 SCORES = test_scores.finetuned_score.to_numpy()
 LABELS = test_scores.diseased.to_numpy()
+VAL = (val_scores.finetuned_score.to_numpy(), val_scores.diseased.to_numpy())
 DISEASE_IDS = [i for i, n in model.names.items() if n in decision.DISEASE_CLASSES]
+VAL_SWEEP = pd.DataFrame(decision.single_threshold_sweep(*VAL, costs))
 SWEEP = pd.DataFrame(decision.single_threshold_sweep(SCORES, LABELS, costs))
-CHOSEN = SWEEP.loc[SWEEP.cost_per_1000.idxmin()]
-BAND = decision.best_review_band(SCORES, LABELS, costs)
+CHOSEN_T = decision.best_single_threshold(*VAL, costs)
+CHOSEN = SWEEP.loc[SWEEP.threshold == CHOSEN_T].iloc[0]
+BAND = decision.best_review_band(*VAL, costs)
 
 
 def ordered(lo: float, hi: float) -> tuple[float, float]:
@@ -68,10 +73,13 @@ def predict(image, lo, hi):
 
 def cost_curve(lo, hi):
     fig = go.Figure()
-    fig.add_scatter(x=SWEEP.threshold, y=SWEEP.cost_per_1000, mode="lines", name="model alone")
+    fig.add_scatter(x=VAL_SWEEP.threshold, y=VAL_SWEEP.cost_per_1000, mode="lines",
+                    name="validation (used to choose)")
+    fig.add_scatter(x=SWEEP.threshold, y=SWEEP.cost_per_1000, mode="lines",
+                    line=dict(dash="dash"), name="test (reported)")
     fig.add_scatter(x=[CHOSEN.threshold], y=[CHOSEN.cost_per_1000], mode="markers",
                     marker=dict(size=12, symbol="star"),
-                    name=f"chosen t={CHOSEN.threshold:.2f} (EUR {CHOSEN.cost_per_1000:.0f})")
+                    name=f"chosen t={CHOSEN.threshold:.2f} (test EUR {CHOSEN.cost_per_1000:.0f})")
     fig.add_vrect(x0=lo, x1=hi, opacity=0.15, line_width=0, annotation_text="review band")
     fig.update_layout(xaxis_title="Reject threshold (disease score)",
                       yaxis_title="Expected cost per 1,000 avocados (EUR)",
@@ -98,7 +106,7 @@ def operating_point(lo, hi):
 
 
 def alternatives_table():
-    alts = decision.alternatives(SCORES, LABELS, costs)
+    alts = decision.alternatives(SCORES, LABELS, costs, CHOSEN_T, BAND["lo"], BAND["hi"])
     return pd.DataFrame({"policy": list(alts), "EUR per 1,000": [round(v, 2) for v in alts.values()]})
 
 
@@ -117,7 +125,9 @@ def baselines_table():
     rows = []
     for name, m in metrics["baselines"].items():
         rows.append({"model": name, "mAP50": m.get("map50"), "mAP50-95": m.get("map50_95"),
-                     "image-level AUC": m.get("auc"), "min EUR per 1,000": m.get("min_cost_per_1000")})
+                     "image-level AUC": m.get("auc"),
+                     "threshold (chosen on val)": m.get("threshold_chosen_on_val"),
+                     "test EUR per 1,000": m.get("test_cost_per_1000")})
     return pd.DataFrame(rows)
 
 
@@ -126,7 +136,8 @@ with gr.Blocks(title="Avocado disease sorting") as demo:
         "# Avocado disease sorting\n"
         f"Finetuned yolo11n on `{metrics['dataset']['workspace']}/{metrics['dataset']['project']}` "
         f"v{metrics['dataset']['version']}. Positive class: **diseased** (reject). "
-        f"Test split: {metrics['dataset']['test_images']} images, {metrics['dataset']['test_diseased']} diseased."
+        f"Test split: {metrics['dataset']['test_images']} images, {metrics['dataset']['test_diseased']} diseased. "
+        "Thresholds are chosen on the validation split; every number shown is measured on test."
     )
     with gr.Row():
         lo = gr.Slider(0, 1, value=BAND["lo"], step=0.01, label="Lower threshold (below: pass)")

@@ -171,9 +171,9 @@ def evaluate_detection(model: YOLO, names: list[str], stats: pd.DataFrame) -> tu
     return overall, pd.DataFrame(rows), confusion
 
 
-def image_scores(model: YOLO, class_ids: list[int]) -> list[float]:
-    """Highest confidence among boxes of the given classes, per test image."""
-    paths = sorted((DATA_DIR / "test" / "images").glob("*"))
+def image_scores(model: YOLO, class_ids: list[int], split: str) -> list[float]:
+    """Highest confidence among boxes of the given classes, per image."""
+    paths = sorted((DATA_DIR / split / "images").glob("*"))
     scores = []
     for result in model.predict([str(p) for p in paths], conf=0.001, imgsz=IMGSZ,
                                 device=DEVICE, stream=True, verbose=False):
@@ -184,12 +184,12 @@ def image_scores(model: YOLO, class_ids: list[int]) -> list[float]:
     return scores
 
 
-def image_labels(names: list[str]) -> tuple[list[str], np.ndarray]:
+def image_labels(names: list[str], split: str) -> tuple[list[str], np.ndarray]:
     disease_ids = {names.index(c) for c in decision.DISEASE_CLASSES}
-    paths = sorted((DATA_DIR / "test" / "images").glob("*"))
+    paths = sorted((DATA_DIR / split / "images").glob("*"))
     labels = []
     for p in paths:
-        classes = {c for c, _ in read_labels(DATA_DIR / "test" / "labels" / f"{p.stem}.txt")}
+        classes = {c for c, _ in read_labels(DATA_DIR / split / "labels" / f"{p.stem}.txt")}
         labels.append(int(bool(classes & disease_ids)))
     return [p.name for p in paths], np.array(labels)
 
@@ -202,25 +202,28 @@ def roc_auc(scores: np.ndarray, labels: np.ndarray) -> float:
     return float((greater + 0.5 * ties) / (len(pos) * len(neg)))
 
 
-def decision_summary(scores: np.ndarray, labels: np.ndarray, costs: dict) -> dict:
-    sweep = decision.single_threshold_sweep(scores, labels, costs)
-    best = min(sweep, key=lambda r: r["cost_per_1000"])
+def decision_summary(val: tuple, test: tuple, costs: dict) -> dict:
+    """Pick the threshold on validation, report how it does on test."""
+    t = decision.best_single_threshold(*val, costs)
+    rates = decision.outcome_rates(*test, t, t)
     return {
-        "auc": round(roc_auc(scores, labels), 3),
-        "best_threshold": best["threshold"],
-        "recall_at_best": round(best["recall"], 3),
-        "false_positive_rate_at_best": round(best["false_positive_rate"], 3),
-        "min_cost_per_1000": round(best["cost_per_1000"], 2),
+        "auc": round(roc_auc(*test), 3),
+        "threshold_chosen_on_val": t,
+        "test_recall": round(rates["pos"]["reject"], 3),
+        "test_false_positive_rate": round(rates["neg"]["reject"], 3),
+        "test_cost_per_1000": round(1000 * decision.expected_cost(rates, costs)["cost_per_case"], 2),
     }
 
 
-def plot_cost_curve(sweep: pd.DataFrame, chosen: pd.Series, band: dict) -> None:
+def plot_cost_curve(sweep: pd.DataFrame, threshold: float, band: dict) -> None:
+    chosen = sweep.loc[sweep.threshold == threshold].iloc[0]
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(sweep.threshold, sweep.cost_per_1000, label="model alone")
-    ax.plot(chosen.threshold, chosen.cost_per_1000, "r*", markersize=14,
-            label=f"chosen t={chosen.threshold:.2f} (EUR {chosen.cost_per_1000:.0f} per 1,000)")
+    ax.plot(sweep.threshold, sweep.val_cost_per_1000, label="validation (used to choose)")
+    ax.plot(sweep.threshold, sweep.test_cost_per_1000, "--", label="test (reported)")
+    ax.plot(chosen.threshold, chosen.test_cost_per_1000, "r*", markersize=14,
+            label=f"chosen t={threshold:.2f} (test EUR {chosen.test_cost_per_1000:.0f} per 1,000)")
     ax.axvspan(band["lo"], band["hi"], alpha=0.15, color="orange",
-               label=f"review band {band['lo']:.2f}-{band['hi']:.2f} (EUR {1000 * band['cost_per_case']:.0f} per 1,000)")
+               label=f"review band {band['lo']:.2f}-{band['hi']:.2f}")
     ax.set_xlabel("Reject threshold (disease score)")
     ax.set_ylabel("Expected cost per 1,000 avocados (EUR)")
     ax.legend()
@@ -253,32 +256,64 @@ def main(train_model: bool = True) -> None:
     per_class.to_csv(ARTIFACTS / "per_class.csv", index=False)
     (ARTIFACTS / "confusion_matrix.json").write_text(json.dumps(confusion, indent=2))
 
+    # Thresholds are chosen on the validation split and evaluated on test, so
+    # the reported cost is not tuned on the data it is measured on.
     disease_ids = [names.index(c) for c in decision.DISEASE_CLASSES]
-    files, labels = image_labels(names)
-    finetuned = np.array(image_scores(model, disease_ids))
-    # COCO has no disease classes, so its only possible signal is "found an object".
-    coco = np.array(image_scores(YOLO(BASE_MODEL), []))
-    pd.DataFrame({"image": files, "diseased": labels, "finetuned_score": finetuned,
-                  "coco_zero_shot_score": coco}).to_csv(ARTIFACTS / "test_scores.csv", index=False)
+    coco_model = YOLO(BASE_MODEL)
+    scores = {}
+    for split in ("valid", "test"):
+        files, labels = image_labels(names, split)
+        finetuned = np.array(image_scores(model, disease_ids, split))
+        # COCO has no disease classes, so its only possible signal is "found an object".
+        coco = np.array(image_scores(coco_model, [], split))
+        scores[split] = {"labels": labels, "finetuned": finetuned, "coco": coco}
+        pd.DataFrame({"image": files, "diseased": labels, "finetuned_score": finetuned,
+                      "coco_zero_shot_score": coco}).to_csv(ARTIFACTS / f"{split}_scores.csv", index=False)
+    val = (scores["valid"]["finetuned"], scores["valid"]["labels"])
+    test = (scores["test"]["finetuned"], scores["test"]["labels"])
+    labels = test[1]
 
-    sweep = pd.DataFrame(decision.single_threshold_sweep(finetuned, labels, costs))
+    val_sweep = pd.DataFrame(decision.single_threshold_sweep(*val, costs))
+    test_sweep = pd.DataFrame(decision.single_threshold_sweep(*test, costs))
+    sweep = pd.DataFrame({
+        "threshold": val_sweep.threshold,
+        "val_cost_per_1000": val_sweep.cost_per_1000,
+        "test_cost_per_1000": test_sweep.cost_per_1000,
+        "test_recall": test_sweep.recall,
+        "test_false_positive_rate": test_sweep.false_positive_rate,
+    })
     sweep.to_csv(ARTIFACTS / "cost_sweep.csv", index=False)
-    band = decision.best_review_band(finetuned, labels, costs)
-    chosen = sweep.loc[sweep.cost_per_1000.idxmin()]
-    plot_cost_curve(sweep, chosen, band)
+    threshold = decision.best_single_threshold(*val, costs)
+    band = decision.best_review_band(*val, costs)
+    plot_cost_curve(sweep, threshold, band)
+
+    single_rates = decision.outcome_rates(*test, threshold, threshold)
+    band_rates = decision.outcome_rates(*test, band["lo"], band["hi"])
+    band_test = decision.expected_cost(band_rates, costs)
 
     p = costs["base_rate"]
+    coco_val = (scores["valid"]["coco"], scores["valid"]["labels"])
+    coco_test = (scores["test"]["coco"], labels)
     baselines = {
-        "finetuned yolo11n": {**overall, **decision_summary(finetuned, labels, costs)},
+        "finetuned yolo11n": {**overall, **decision_summary(val, test, costs)},
         "COCO yolo11n zero-shot": {"map50": 0.0, "map50_95": 0.0,
                                    "note": "no COCO class matches any of our five classes",
-                                   **decision_summary(coco, labels, costs)},
+                                   **decision_summary(coco_val, coco_test, costs)},
         "trivial: predict nothing (export all)": {
             "map50": 0.0, "map50_95": 0.0, "auc": 0.5,
-            "min_cost_per_1000": round(1000 * p * costs["cost_fn_eur"] + 1000 * (1 - p) * costs["cost_tn_eur"], 2)},
+            "test_cost_per_1000": round(1000 * p * costs["cost_fn_eur"] + 1000 * (1 - p) * costs["cost_tn_eur"], 2)},
         "trivial: majority of test split (reject all)": {
             "map50": 0.0, "map50_95": 0.0, "auc": 0.5,
-            "min_cost_per_1000": round(1000 * p * costs["cost_tp_eur"] + 1000 * (1 - p) * costs["cost_fp_eur"], 2)},
+            "test_cost_per_1000": round(1000 * p * costs["cost_tp_eur"] + 1000 * (1 - p) * costs["cost_fp_eur"], 2)},
+    }
+    # What the old method (tune and report on test) would have claimed, to
+    # show how optimistic that was.
+    test_band = decision.best_review_band(*test, costs)
+    test_tuned = {
+        "single_threshold": decision.best_single_threshold(*test, costs),
+        "single_cost_per_1000": round(float(test_sweep.cost_per_1000.min()), 2),
+        "band": [test_band["lo"], test_band["hi"]],
+        "band_cost_per_1000": round(1000 * test_band["cost_per_case"], 2),
     }
 
     summary = {
@@ -292,11 +327,23 @@ def main(train_model: bool = True) -> None:
         "detection": overall,
         "baselines": baselines,
         "costs_used": costs,
-        "single_threshold": {"threshold": float(chosen.threshold),
-                             "cost_per_1000": round(float(chosen.cost_per_1000), 2)},
-        "review_band": {**band, "cost_per_1000": round(1000 * band["cost_per_case"], 2),
-                        **decision.staffing(band["review_share"], costs)},
-        "alternatives_per_1000": decision.alternatives(finetuned, labels, costs),
+        "threshold_selection": "chosen on the validation split, costs reported on the test split",
+        "single_threshold": {
+            "threshold": threshold,
+            "test_recall": round(single_rates["pos"]["reject"], 3),
+            "test_false_positive_rate": round(single_rates["neg"]["reject"], 3),
+            "test_cost_per_1000": round(1000 * decision.expected_cost(single_rates, costs)["cost_per_case"], 2),
+        },
+        "review_band": {
+            "lo": band["lo"], "hi": band["hi"],
+            "val_cost_per_1000": round(1000 * band["cost_per_case"], 2),
+            "test_cost_per_1000": round(1000 * band_test["cost_per_case"], 2),
+            "test_review_share": band_test["review_share"],
+            "test_outcomes": decision.confusion_3way(*test, band["lo"], band["hi"]),
+            **decision.staffing(band_test["review_share"], costs),
+        },
+        "alternatives_per_1000": decision.alternatives(*test, costs, threshold, band["lo"], band["hi"]),
+        "if_tuned_on_test_instead": test_tuned,
     }
     (ARTIFACTS / "metrics.json").write_text(json.dumps(summary, indent=2, default=float))
     print(json.dumps({k: summary[k] for k in ("detection", "single_threshold", "review_band",

@@ -15,6 +15,9 @@ A single threshold is the special case lo == hi (nothing goes to review).
 Costs are computed from rates (TPR, FPR, ...) and then reweighted by the
 assumed base rate, not by the test split's mix, because the test split is
 about 74% diseased and a real packhouse sees far fewer.
+
+Thresholds are chosen on the validation split and then evaluated on the test
+split, so the reported cost is not the minimum of the same data it was tuned on.
 """
 
 import json
@@ -98,6 +101,11 @@ def single_threshold_sweep(scores: np.ndarray, labels: np.ndarray, costs: dict) 
     return rows
 
 
+def best_single_threshold(scores: np.ndarray, labels: np.ndarray, costs: dict) -> float:
+    sweep = single_threshold_sweep(scores, labels, costs)
+    return min(sweep, key=lambda r: r["cost_per_1000"])["threshold"]
+
+
 def best_review_band(scores: np.ndarray, labels: np.ndarray, costs: dict) -> dict:
     """Search every (lo, hi) pair on the threshold grid for the cheapest policy."""
     best = None
@@ -109,20 +117,26 @@ def best_review_band(scores: np.ndarray, labels: np.ndarray, costs: dict) -> dic
     return best
 
 
-def alternatives(scores: np.ndarray, labels: np.ndarray, costs: dict) -> dict:
-    """Cost per 1,000 of the policies the review design is priced against."""
-    sweep = single_threshold_sweep(scores, labels, costs)
-    model_alone = min(sweep, key=lambda r: r["cost_per_1000"])
+def alternatives(scores: np.ndarray, labels: np.ndarray, costs: dict,
+                 threshold: float, lo: float, hi: float) -> dict:
+    """Cost per 1,000 of the policies the review design is priced against.
+
+    The thresholds are fixed beforehand (chosen on the validation split), so
+    evaluating them on the test split is not optimistic.
+    """
     everyone = {"pass": 0.0, "review": 1.0, "reject": 0.0}
     nobody = {"pass": 1.0, "review": 0.0, "reject": 0.0}
     reject_all = {"pass": 0.0, "review": 0.0, "reject": 1.0}
-    band = best_review_band(scores, labels, costs)
+
+    def per_1000(rates):
+        return 1000 * expected_cost(rates, costs)["cost_per_case"]
+
     return {
-        "do_nothing (export everything)": 1000 * expected_cost({"pos": nobody, "neg": nobody}, costs)["cost_per_case"],
-        "reject everything": 1000 * expected_cost({"pos": reject_all, "neg": reject_all}, costs)["cost_per_case"],
-        "person checks everything": 1000 * expected_cost({"pos": everyone, "neg": everyone}, costs)["cost_per_case"],
-        f"model alone (t={model_alone['threshold']:.2f})": model_alone["cost_per_1000"],
-        f"model + review band ({band['lo']:.2f}-{band['hi']:.2f})": 1000 * band["cost_per_case"],
+        "do_nothing (export everything)": per_1000({"pos": nobody, "neg": nobody}),
+        "reject everything": per_1000({"pos": reject_all, "neg": reject_all}),
+        "person checks everything": per_1000({"pos": everyone, "neg": everyone}),
+        f"model alone (t={threshold:.2f})": per_1000(outcome_rates(scores, labels, threshold, threshold)),
+        f"model + review band ({lo:.2f}-{hi:.2f})": per_1000(outcome_rates(scores, labels, lo, hi)),
     }
 
 
